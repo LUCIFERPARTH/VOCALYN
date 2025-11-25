@@ -1,20 +1,19 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# *Vocalyn*
 
-# Run and deploy your AI Studio app
+Vocalyn is a voice-first intelligent note-taking app that converts speech into refined notes, analyzes emotions, and organizes information smartly. It captures audio, transcribes it, refines the content using AI, performs sentiment analysis, and provides clean output for users.
 
-This contains everything you need to run your app locally.
+ Features
 
-View your app in AI Studio: https://ai.studio/apps/drive/1v_l7Ux-e9ruOzCK0X6VY4c8rem04uSxA
+* Voice recording and speech-to-text conversion
+* AI-refined notes from raw speech
+* Emotion detection from voice and text
+* Emotion-tagged notes and insights
+* Semantic search across notes
+* File upload for the **Ask AI** feature
+* Q&A based only on uploaded data
+* Saves useful Q&A responses as notes
+* Supabase integration for storage and user data
 
-## Run Locally
+# *Goal*
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+To build a fully voice-first intelligent note system with emotional understanding, smart refinement, and deep search.
