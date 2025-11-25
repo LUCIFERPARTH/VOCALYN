@@ -1,0 +1,7 @@
+{
+  "name": "Vocalyn: AI Voice Notes",
+  "description": "A voice-driven note-taking app that uses AI to transcribe, refine, and analyze the emotional content of your spoken thoughts.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
