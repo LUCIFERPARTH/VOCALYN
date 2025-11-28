@@ -49,7 +49,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onSwitchToSignUp 
 
     const handleVerify2FA = async (e: React.FormEvent) => {
         e.preventDefault();
-        // tempUser check is just to ensure we are in the right flow, though verifyLoginMFA relies on the active session
+        // tempUser check is just to ensure we are in the right flow
         if (!tempUser || !twoFactorCode) return;
         
         setIsLoading(true);

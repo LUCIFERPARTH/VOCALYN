@@ -19,11 +19,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, user, on
     const [enrollmentData, setEnrollmentData] = useState<{ id: string; secret: string; qr_code: string } | null>(null);
     const [verifyCode, setVerifyCode] = useState('');
 
+    // Disabling State
+    const [isDisabling, setIsDisabling] = useState(false);
+
     useEffect(() => {
         if (isOpen) {
             setTwoFactorEnabled(user.twoFactorEnabled || false);
             setError(null);
             setIsEnrolling(false);
+            setIsDisabling(false);
             setEnrollmentData(null);
             setVerifyCode('');
         }
@@ -50,12 +54,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, user, on
         setError(null);
         try {
             const data = await authService.enrollMFA();
-            // @ts-ignore - Supabase type definition for enroll response might be tricky, casting manually or ignoring
-            setEnrollmentData(data.totp);
+            setEnrollmentData({
+                id: data.id,
+                secret: data.totp.secret,
+                qr_code: data.totp.qr_code
+            });
             setIsEnrolling(true);
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
-            setError("Failed to start enrollment.");
+            setError(e.message || "Failed to start enrollment. Check console for details.");
         } finally {
             setIsLoading(false);
         }
@@ -72,26 +79,30 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, user, on
             setEnrollmentData(null);
             const updatedUser = { ...user, twoFactorEnabled: true };
             onUserUpdate(updatedUser);
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
-            setError("Invalid code. Please try again.");
+            setError(e.message || "Invalid code. Please try again.");
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleDisable2FA = async () => {
+    const handleConfirmDisable = async () => {
+        if (verifyCode.length !== 6) return;
         setIsLoading(true);
         setError(null);
         try {
-            const updatedUser = await authService.disableMFA();
+            // Now requires code to disable
+            const updatedUser = await authService.disableMFA(verifyCode);
             setTwoFactorEnabled(false);
+            setIsDisabling(false);
+            setVerifyCode('');
             if (updatedUser) {
                 onUserUpdate(updatedUser);
             }
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
-            setError("Failed to disable 2FA.");
+            setError(e.message || "Failed to disable 2FA. Code may be incorrect.");
         } finally {
             setIsLoading(false);
         }
@@ -124,7 +135,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, user, on
                 </div>
 
                 {error && (
-                    <div className="bg-red-900/50 text-red-300 p-3 rounded-md mb-4 text-sm">
+                    <div className="bg-red-900/50 text-red-300 p-3 rounded-md mb-4 text-sm border border-red-800">
                         {error}
                     </div>
                 )}
@@ -141,9 +152,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, user, on
                                     {twoFactorEnabled ? 'Active' : 'Not enabled'}
                                 </p>
                             </div>
-                            {!isEnrolling && (
+                            {!isEnrolling && !isDisabling && (
                                 <button
-                                    onClick={twoFactorEnabled ? handleDisable2FA : handleStartEnrollment}
+                                    onClick={() => {
+                                        if (twoFactorEnabled) {
+                                            setIsDisabling(true);
+                                            setVerifyCode('');
+                                            setError(null);
+                                        } else {
+                                            handleStartEnrollment();
+                                        }
+                                    }}
                                     disabled={isLoading}
                                     className={`px-4 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 ${
                                         twoFactorEnabled 
@@ -155,6 +174,43 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, user, on
                                 </button>
                             )}
                         </div>
+
+                        {/* Disabling Flow */}
+                        {isDisabling && (
+                            <div className="mt-4 p-4 bg-gray-700 rounded-lg border border-red-900/50 animate-fade-in">
+                                <h4 className="text-white font-semibold mb-2">Confirm Disabling 2FA</h4>
+                                <p className="text-sm text-gray-300 mb-4">
+                                    Please enter the code from your authenticator app to confirm you want to turn off security.
+                                </p>
+                                
+                                <div className="space-y-2">
+                                    <label htmlFor="verify-disable" className="block text-sm font-medium text-gray-300">
+                                        Verification Code
+                                    </label>
+                                    <input
+                                        id="verify-disable"
+                                        type="text"
+                                        value={verifyCode}
+                                        onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                        placeholder="000000"
+                                        className="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white text-center font-mono tracking-widest focus:ring-2 focus:ring-red-500 focus:outline-none"
+                                    />
+                                    <button
+                                        onClick={handleConfirmDisable}
+                                        disabled={isLoading || verifyCode.length !== 6}
+                                        className="w-full py-2 mt-2 bg-red-600 hover:bg-red-500 text-white rounded-md font-medium disabled:opacity-50"
+                                    >
+                                        {isLoading ? 'Verifying...' : 'Verify & Disable'}
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsDisabling(false); setVerifyCode(''); }}
+                                        className="w-full py-2 text-sm text-gray-400 hover:text-white"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Enrollment Flow */}
                         {isEnrolling && enrollmentData && (

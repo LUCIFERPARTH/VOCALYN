@@ -37,7 +37,7 @@ export const signIn = async (email: string, password: string): Promise<User> => 
         throw new Error("User not found.");
     }
 
-    // Check MFA status via Supabase Auth API
+    // Check MFA status
     const { data: factors } = await supabase.auth.mfa.listFactors();
     const hasVerifiedMFA = factors?.totp?.some(f => f.status === 'verified') ?? false;
 
@@ -50,7 +50,42 @@ export const signIn = async (email: string, password: string): Promise<User> => 
 
 // Enroll in MFA (TOTP)
 export const enrollMFA = async () => {
-    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp' });
+    // Refresh session to ensure we have valid permissions to enroll a factor
+    const { error: refreshError } = await supabase.auth.refreshSession();
+    
+    if (refreshError) {
+        console.error("Session refresh failed", refreshError);
+        throw new Error("Session expired. Please sign out and sign in again.");
+    }
+
+    // CLEANUP: Attempt to remove old factors to keep the list clean.
+    // We swallow errors here because we don't want to block enrollment if cleanup fails.
+    try {
+        const { data: factors } = await supabase.auth.mfa.listFactors();
+        if (factors?.totp) {
+            const factorsToRemove = factors.totp.filter((f: any) => 
+                f.status === 'unverified' || 
+                (f.friendly_name && f.friendly_name.startsWith('Vocalyn Authenticator'))
+            );
+            
+            for (const factor of factorsToRemove) {
+                await supabase.auth.mfa.unenroll({ factorId: factor.id });
+            }
+        }
+    } catch (e) {
+        console.warn("Cleanup of old factors failed, proceeding with enrollment anyway.", e);
+    }
+    
+    // Generate a unique friendly name to prevent "already exists" errors
+    const uniqueSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const friendlyName = `Vocalyn Authenticator ${uniqueSuffix}`;
+
+    const { data, error } = await supabase.auth.mfa.enroll({ 
+        factorType: 'totp', 
+        issuer: 'Vocalyn',
+        friendlyName: friendlyName 
+    });
+    
     if (error) throw error;
     return data; // Contains id, type, secret, qr_code
 };
@@ -58,7 +93,10 @@ export const enrollMFA = async () => {
 // Verify MFA Enrollment
 export const verifyMFAEnrollment = async (factorId: string, code: string) => {
     const challenge = await supabase.auth.mfa.challenge({ factorId });
-    if (challenge.error) throw challenge.error;
+    if (challenge.error) {
+        console.error("MFA Challenge Error:", challenge.error);
+        throw challenge.error;
+    }
 
     const verify = await supabase.auth.mfa.verify({
         factorId,
@@ -66,29 +104,69 @@ export const verifyMFAEnrollment = async (factorId: string, code: string) => {
         code,
     });
 
-    if (verify.error) throw verify.error;
+    if (verify.error) {
+        console.error("MFA Verify Error:", verify.error);
+        throw verify.error;
+    }
+    
+    // Refresh session to ensure claims are updated immediately
+    await supabase.auth.refreshSession();
+    
     return true;
 };
 
-// Disable MFA
-export const disableMFA = async (): Promise<User | null> => {
+// Disable MFA with code verification
+export const disableMFA = async (code: string): Promise<User | null> => {
+     // Ensure we are fresh before modifying security settings
+     const { error: refreshError } = await supabase.auth.refreshSession();
+     if (refreshError) throw new Error("Session expired. Please re-authenticate.");
+
      const { data: factors } = await supabase.auth.mfa.listFactors();
-     if (factors?.totp) {
-         // Unenroll all verified factors
-         const verifiedFactors = factors.totp.filter(f => f.status === 'verified');
-         for (const factor of verifiedFactors) {
-             await supabase.auth.mfa.unenroll({ factorId: factor.id });
-         }
+     
+     if (!factors?.totp || factors.totp.length === 0) {
+         // No factors exist, effectively disabled already
+         return await getCurrentUser();
+     }
+
+     // Find a verified factor to validate the code against
+     const verifiedFactor = factors.totp.find(f => f.status === 'verified');
+     if (!verifiedFactor) {
+         throw new Error("Security Error: No verified 2FA factor found to validate request.");
+     }
+
+     // Verify Code before disabling
+     const challenge = await supabase.auth.mfa.challenge({ factorId: verifiedFactor.id });
+     if (challenge.error) throw challenge.error;
+
+     const verify = await supabase.auth.mfa.verify({
+        factorId: verifiedFactor.id,
+        challengeId: challenge.data.id,
+        code
+     });
+
+     if (verify.error) {
+         throw new Error("Invalid code. Cannot disable 2FA.");
+     }
+
+     // Code is valid, proceed to unenroll ALL TOTP factors
+     for (const factor of factors.totp) {
+         await supabase.auth.mfa.unenroll({ factorId: factor.id });
      }
      
+     await supabase.auth.refreshSession();
      return await getCurrentUser();
 };
 
 // Verify Login MFA
 export const verifyLoginMFA = async (code: string): Promise<boolean> => {
     const { data: factors } = await supabase.auth.mfa.listFactors();
-    const factor = factors?.totp?.find(f => f.status === 'verified');
-    if (!factor) throw new Error("No MFA configuration found.");
+    
+    if (!factors || !factors.totp || factors.totp.length === 0) {
+        throw new Error("No MFA configuration found.");
+    }
+
+    const factor = factors.totp.find(f => f.status === 'verified');
+    if (!factor) throw new Error("No verified MFA factor found.");
     
     const challenge = await supabase.auth.mfa.challenge({ factorId: factor.id });
     if (challenge.error) throw challenge.error;
@@ -100,6 +178,10 @@ export const verifyLoginMFA = async (code: string): Promise<boolean> => {
     });
     
     if (verify.error) throw verify.error;
+    
+    // Refresh session to apply AAL2 status to the current session
+    await supabase.auth.refreshSession();
+
     return true;
 };
 
